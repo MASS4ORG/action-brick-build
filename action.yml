@@ -1,0 +1,138 @@
+name: Turian brick build
+description: Verify, compile and pack a Turian brick (and its baked twin) into .brick archives, then install each in a fresh consumer project. Needs no secrets.
+author: MASS4
+branding:
+  icon: package
+  color: purple
+
+inputs:
+  brick-path:
+    description: Folder of the brick, holding package.json, relative to the workspace
+    default: .
+  precast:
+    description: Compile the brick's assemblies into the archive, which also proves they build
+    default: "true"
+  twin:
+    description: Also bake the brick and pack its twin <id>.bake beside it
+    default: "false"
+  consumer-test:
+    description: Install, compile and cold-restore each archive in a fresh project, as a user would
+    default: "true"
+  version:
+    description: Tag of the ghcr.io/mass4org/turian-cli image to build with
+    default: latest
+  image:
+    description: Full image reference to build with instead, e.g. one pinned by digest
+    default: ""
+  out:
+    description: Folder the archives and build.json are written to, outside the brick and holding no archives yet; relative to the workspace, empty for one under the runner's temp folder
+    default: ""
+
+outputs:
+  image:
+    description: The image that built the archives, pinned by digest
+    value: ${{ steps.build.outputs.image }}
+  version:
+    description: The Turian version of that image
+    value: ${{ steps.build.outputs.version }}
+  directory:
+    description: Absolute path of the out folder
+    value: ${{ steps.build.outputs.directory }}
+  archive:
+    description: File name of the brick's archive in the out folder
+    value: ${{ steps.build.outputs.archive }}
+  twin-archive:
+    description: File name of the twin's archive in the out folder; empty without twin
+    value: ${{ steps.build.outputs.twin-archive }}
+
+runs:
+  using: composite
+  steps:
+    # The tag is resolved to a digest once and every command runs that digest. build.json records it beside the
+    # archives with their hashes, so a build can be redone with exactly the same CLI. Inputs reach the script through
+    # env, never through expression interpolation.
+    - name: Verify, compile and pack
+      id: build
+      shell: bash
+      env:
+        BRICK_PATH: ${{ inputs.brick-path }}
+        PRECAST: ${{ inputs.precast }}
+        TWIN: ${{ inputs.twin }}
+        CONSUMER_TEST: ${{ inputs.consumer-test }}
+        TURIAN_IMAGE: ${{ inputs.image != '' && inputs.image || format('ghcr.io/mass4org/turian-cli:{0}', inputs.version) }}
+        OUT: ${{ inputs.out }}
+      run: |
+        engine=$(command -v docker || command -v podman) || { echo "::error::Neither docker nor podman is available; use a Linux runner."; exit 1; }
+        "$engine" pull -q "$TURIAN_IMAGE" > /dev/null || "$engine" image inspect "$TURIAN_IMAGE" > /dev/null
+        # The digest the requested repository knows the image by; an image built in the job has none.
+        repository="${TURIAN_IMAGE%%@*}"
+        [[ "${repository##*/}" != *:* ]] || repository="${repository%:*}"
+        pinned=$("$engine" image inspect --format '{{ range .RepoDigests }}{{ println . }}{{ end }}' "$TURIAN_IMAGE" \
+          | awk -v prefix="$repository@" 'index($0, prefix) == 1 { print; exit }')
+        image="${pinned:-$TURIAN_IMAGE}"
+        version=$("$engine" image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image")
+
+        brick=$(realpath -m "$GITHUB_WORKSPACE/$BRICK_PATH")
+        case "$OUT" in
+          "") out="$RUNNER_TEMP/bricks" ;;
+          /*) out=$(realpath -m "$OUT") ;;
+          *) out=$(realpath -m "$GITHUB_WORKSPACE/$OUT") ;;
+        esac
+        # Packing takes every file under the brick, so archives written inside it would end up in the next one.
+        if [[ "$out/" == "$brick/"* ]]; then
+          echo "::error::out ($out) is inside the brick ($brick); write the archives outside it."
+          exit 1
+        fi
+        mkdir -p "$out"
+        if compgen -G "$out/*.brick" > /dev/null; then
+          echo "::error::$out already holds archives; build into an empty folder."
+          exit 1
+        fi
+
+        # Each run gets its own home, brick store and configuration, and writes files the runner user owns.
+        run_args=(--rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e GAYA_BRICKS=/tmp/bricks -e GAYA_CONFIG_HOME=/tmp/gaya)
+        [[ "$engine" == *podman ]] && run_args+=(--userns=keep-id)
+        turian() {
+          "$engine" run "${run_args[@]}" -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -v "$out:/out" -w "$GITHUB_WORKSPACE" \
+            "$image" "$@"
+        }
+
+        turian brick verify "$BRICK_PATH"
+        flags=()
+        [[ "$PRECAST" == true ]] && flags+=(--precast)
+        [[ "$TWIN" == true ]] && flags+=(--twin)
+        turian brick pack "$BRICK_PATH" --out /out "${flags[@]}"
+
+        archive="" twin_archive=""
+        for path in "$out"/*.brick; do
+          name="${path##*/}"
+          if [[ "$name" == *.bake-*.brick ]]; then twin_archive="$name"; else archive="$name"; fi
+        done
+        [[ -n "$archive" ]] || { echo "::error::brick pack wrote no archive."; exit 1; }
+        [[ "$TWIN" != true || -n "$twin_archive" ]] || { echo "::error::brick pack wrote no twin."; exit 1; }
+
+        if [[ "$CONSUMER_TEST" == true ]]; then
+          if ! "$engine" run --rm --entrypoint sh "$image" -c 'command -v brick-release' > /dev/null; then
+            echo "::error::turian-cli $version cannot run the consumer test; use 3.3.0 or later, or set consumer-test: false."
+            exit 1
+          fi
+          consumer() { "$engine" run "${run_args[@]}" -v "$out:/packed:ro" --entrypoint brick-release "$image" consumer "/packed/$1"; }
+          consumer "$archive"
+          [[ -z "$twin_archive" ]] || consumer "$twin_archive"
+        fi
+
+        entries=()
+        for name in "$archive" $twin_archive; do
+          entries+=("$(jq -cn --arg file "$name" --arg sha256 "$(sha256sum "$out/$name" | cut -d' ' -f1)" '{file: $file, sha256: $sha256}')")
+        done
+        printf '%s\n' "${entries[@]}" | jq -s --arg image "$image" --arg version "$version" \
+          '{turian: {version: $version, image: $image}, archives: .}' > "$out/build.json"
+
+        {
+          echo "directory=$out"
+          echo "image=$image"
+          echo "version=$version"
+          echo "archive=$archive"
+          echo "twin-archive=$twin_archive"
+        } >> "$GITHUB_OUTPUT"
+        echo "Built \`$archive\`${twin_archive:+ and \`$twin_archive\`} with turian-cli $version: \`$image\`" >> "$GITHUB_STEP_SUMMARY"
