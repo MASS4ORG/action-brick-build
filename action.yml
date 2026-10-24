@@ -114,7 +114,7 @@ runs:
 
         if [[ "$CONSUMER_TEST" == true ]]; then
           if ! "$engine" run --rm --entrypoint sh "$image" -c 'command -v brick-release' > /dev/null; then
-            echo "::error::turian-cli $version cannot run the consumer test; use 3.3.0 or later, or set consumer-test: false."
+            echo "::error::turian-cli $version cannot run the consumer test; use 3.4.0 or later, or set consumer-test: false."
             exit 1
           fi
           consumer() { "$engine" run "${run_args[@]}" -v "$out:/packed:ro" --entrypoint brick-release "$image" consumer "/packed/$1"; }
