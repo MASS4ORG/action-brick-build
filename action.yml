@@ -13,7 +13,7 @@ inputs:
     description: Compile the brick's assemblies into the archive, which also proves they build
     default: "true"
   twin:
-    description: Also bake the brick and pack its twin <id>.bake beside it
+    description: Also bake the brick and pack its twin beside it, a variant of the same id and version
     default: "false"
   consumer-test:
     description: Install, compile and cold-restore each archive in a fresh project, as a user would
@@ -103,10 +103,11 @@ runs:
         [[ "$TWIN" == true ]] && flags+=(--twin)
         turian brick pack "$BRICK_PATH" --out /out "${flags[@]}"
 
+        # The archive's own package.json says what it is: a twin declares bakeOf. File names are only labels.
         archive="" twin_archive=""
         for path in "$out"/*.brick; do
           name="${path##*/}"
-          if [[ "$name" == *.bake-*.brick ]]; then twin_archive="$name"; else archive="$name"; fi
+          if unzip -p "$path" package.json | jq -e 'has("bakeOf")' > /dev/null; then twin_archive="$name"; else archive="$name"; fi
         done
         [[ -n "$archive" ]] || { echo "::error::brick pack wrote no archive."; exit 1; }
         [[ "$TWIN" != true || -n "$twin_archive" ]] || { echo "::error::brick pack wrote no twin."; exit 1; }

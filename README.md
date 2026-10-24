@@ -28,7 +28,7 @@ jobs:
 |-----------------|----------|---------------------------------------------------------------------------------------------------|
 | `brick-path`    | `.`      | Folder of the brick, holding `package.json`                                                       |
 | `precast`       | `true`   | Compile the brick's assemblies into the archive, which also proves they build                     |
-| `twin`          | `false`  | Also bake the brick and pack its twin `<id>.bake`                                                 |
+| `twin`          | `false`  | Also bake the brick and pack its twin, a variant of the same id and version                       |
 | `consumer-test` | `true`   | Install, compile and cold-restore each archive in a fresh project; needs turian-cli 3.3.0 or later |
 | `version`       | `latest` | Tag of `ghcr.io/mass4org/turian-cli` to build with                                                |
 | `image`         |          | Full image reference instead, e.g. one pinned by digest                                           |
@@ -41,6 +41,8 @@ jobs:
 | `directory`    | Absolute path of the folder holding the archives     |
 | `archive`      | File name of the brick's archive                     |
 | `twin-archive` | File name of the twin's archive; empty without twin  |
+
+Archives are named `<id>-<version>--<variant>.brick`, but the name is only a label: each one is classified by its own `package.json`, where a twin declares `bakeOf`.
 | `image`        | The image that built them, pinned by digest          |
 | `version`      | The Turian version of that image                     |
 
