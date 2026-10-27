@@ -1,64 +1,29 @@
-# Turian brick build action
+# Brick build action
 
-Verify, compile and pack a [Turian](https://github.com/MASS4ORG/Turian) brick into `.brick` archives, optionally with its baked twin, then install each archive in a fresh project as a user would. It needs no secrets and talks to no store, so it suits anyone building bricks for their own registry. It runs the `ghcr.io/mass4org/turian-cli` container and needs a Linux runner with Docker.
-
-## Usage
+Verify and pack a brick, then install and compile its source and optional twin in fresh consumer projects. This action has no publishing credentials and does not upload to a registry.
 
 ```yaml
 jobs:
-  brick:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-
-      - id: build
-        uses: MASS4ORG/action-brick-build@v1
-        with:
-          twin: true
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: brick
-          path: ${{ steps.build.outputs.directory }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: MASS4ORG/action-brick-build@v1
 ```
 
-## Inputs
+For push/PR verification with optional source tests, use the [reusable verify workflow](https://github.com/MASS4ORG/action-brick-release). For MASS4 store publication, use its release workflow. For your own registry, upload this action's output archives through your own pipeline.
 
-| Input           | Default  | Description                                                                                       |
-|-----------------|----------|---------------------------------------------------------------------------------------------------|
-| `brick-path`    | `.`      | Folder of the brick, holding `package.json`                                                       |
-| `precast`       | `true`   | Compile the brick's assemblies into the archive, which also proves they build                     |
-| `twin`          | `false`  | Also bake the brick and pack its twin, a variant of the same id and version                       |
-| `consumer-test` | `true`   | Install, compile and cold-restore each archive in a fresh project; needs turian-cli 3.3.0 or later |
-| `version`       | `latest` | Tag of `ghcr.io/mass4org/turian-cli` to build with                                                |
-| `image`         |          | Full image reference instead, e.g. one pinned by digest                                           |
-| `out`           |          | Folder for the archives, outside the brick; empty for one under the runner's temp folder          |
+| Input | Default | Purpose |
+|---|---|---|
+| `brick-path` | `.` | Brick folder |
+| `precast` | `true` | Compile runtime assemblies |
+| `twin` | `false` | Also produce the baked variant |
+| `consumer-test` | `true` | Install, compile and cold-restore each archive |
+| `version` | Empty | Highest stable semver CLI image tag; exact stable version override supported |
+| `image` | Empty | Exact CLI image supplied by an orchestrating workflow |
+| `release-tag` | Empty | Inject the tag's semver into the packed manifest; warn on manifest drift |
+| `out` | Runner temp folder | Archive output directory outside the brick |
 
-## Outputs
+Outputs are `image`, `version`, `directory`, `archive` and `twin-archive`. `build.json` records the resolved CLI digest/version and archive hashes. No Docker `latest` tag is used. A manifest already matching `release-tag` is preserved byte-for-byte for retry reproducibility.
 
-| Output         | Description                                          |
-|----------------|------------------------------------------------------|
-| `directory`    | Absolute path of the folder holding the archives     |
-| `archive`      | File name of the brick's archive                     |
-| `twin-archive` | File name of the twin's archive; empty without twin  |
-
-Archives are named `<id>-<version>--<variant>.brick`, but the name is only a label: each one is classified by its own `package.json`, where a twin declares `bakeOf`.
-| `image`        | The image that built them, pinned by digest          |
-| `version`      | The Turian version of that image                     |
-
-## Reproducing a build
-
-`latest` is resolved to a digest once, and every command runs that digest. `build.json`, written beside the archives, records it with each archive's SHA-256:
-
-```json
-{
-  "turian": { "version": "3.3.0", "image": "ghcr.io/mass4org/turian-cli@sha256:…" },
-  "archives": [ { "file": "org.example.brick-1.0.0.brick", "sha256": "…" } ]
-}
-```
-
-Pass that image as `image` to build again with exactly the same CLI. Archives are byte-identical only when built by the same image.
-
-## License
-
-[MIT](LICENSE.md)
+`@v1` follows compatible implementation updates. Breaking inputs use a new major version; Turian releases do not require action releases.

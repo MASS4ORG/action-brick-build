@@ -19,8 +19,11 @@ inputs:
     description: Install, compile and cold-restore each archive in a fresh project, as a user would
     default: "true"
   version:
-    description: Tag of the ghcr.io/mass4org/turian-cli image to build with
-    default: latest
+    description: Exact stable CLI version; empty resolves the highest stable semver image tag
+    default: ""
+  release-tag:
+    description: Release tag supplying the packed manifest version; empty retains the dev manifest version
+    default: ""
   image:
     description: Full image reference to build with instead, e.g. one pinned by digest
     default: ""
@@ -48,6 +51,19 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Select the CLI image
+      if: inputs.image == ''
+      id: select
+      uses: MASS4ORG/action-brick-release/resolve@v1
+      with:
+        turian-version: ${{ inputs.version }}
+    - name: Apply the release tag version
+      if: inputs.release-tag != ''
+      shell: bash
+      env:
+        RELEASE_TAG: ${{ inputs.release-tag }}
+        BRICK_PATH: ${{ github.workspace }}/${{ inputs.brick-path }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/release_version.py"
     # The tag is resolved to a digest once and every command runs that digest. build.json records it beside the
     # archives with their hashes, so a build can be redone with exactly the same CLI. Inputs reach the script through
     # env, never through expression interpolation.
@@ -59,7 +75,7 @@ runs:
         PRECAST: ${{ inputs.precast }}
         TWIN: ${{ inputs.twin }}
         CONSUMER_TEST: ${{ inputs.consumer-test }}
-        TURIAN_IMAGE: ${{ inputs.image != '' && inputs.image || format('ghcr.io/mass4org/turian-cli:{0}', inputs.version) }}
+        TURIAN_IMAGE: ${{ inputs.image != '' && inputs.image || steps.select.outputs.image }}
         OUT: ${{ inputs.out }}
       run: |
         engine=$(command -v docker || command -v podman) || { echo "::error::Neither docker nor podman is available; use a Linux runner."; exit 1; }
@@ -114,7 +130,7 @@ runs:
 
         if [[ "$CONSUMER_TEST" == true ]]; then
           if ! "$engine" run --rm --entrypoint sh "$image" -c 'command -v brick-release' > /dev/null; then
-            echo "::error::turian-cli $version cannot run the consumer test; use 3.4.0 or later, or set consumer-test: false."
+            echo "::error::turian-cli $version cannot run the consumer test; use an image that ships brick-release, or set consumer-test: false."
             exit 1
           fi
           consumer() { "$engine" run "${run_args[@]}" -v "$out:/packed:ro" --entrypoint brick-release "$image" consumer "/packed/$1"; }
