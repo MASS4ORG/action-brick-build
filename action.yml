@@ -57,7 +57,7 @@ runs:
     - name: Select the CLI image
       if: inputs.image == ''
       id: select
-      uses: MASS4ORG/action-brick-release/resolve@v1
+      uses: MASS4ORG/brick-workflows/resolve@v1
       with:
         turian-version: ${{ inputs.version }}
     - name: Apply the release tag version

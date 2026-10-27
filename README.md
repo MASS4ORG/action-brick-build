@@ -8,10 +8,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: MASS4ORG/action-brick-build@v1
+      - uses: MASS4ORG/brick-action-build@v1
 ```
 
-For push/PR verification with optional source tests, use the [reusable verify workflow](https://github.com/MASS4ORG/action-brick-release). For MASS4 store publication, use its release workflow. For your own registry, upload this action's output archives through your own pipeline.
+For push/PR verification with optional source tests, use the [reusable verify workflow](https://github.com/MASS4ORG/brick-workflows). For MASS4 store publication, use its release workflow. For your own registry, upload this action's output archives through your own pipeline.
 
 | Input | Default | Purpose |
 |---|---|---|
