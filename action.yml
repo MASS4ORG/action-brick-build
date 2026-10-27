@@ -24,6 +24,9 @@ inputs:
   release-tag:
     description: Release tag supplying the packed manifest version; empty retains the dev manifest version
     default: ""
+  replay-directory:
+    description: Directory of recorded archives and their integrity receipts, supplied by the release planner
+    default: ""
   image:
     description: Full image reference to build with instead, e.g. one pinned by digest
     default: ""
@@ -77,6 +80,7 @@ runs:
         CONSUMER_TEST: ${{ inputs.consumer-test }}
         TURIAN_IMAGE: ${{ inputs.image != '' && inputs.image || steps.select.outputs.image }}
         OUT: ${{ inputs.out }}
+        REPLAY_DIRECTORY: ${{ inputs.replay-directory }}
       run: |
         engine=$(command -v docker || command -v podman) || { echo "::error::Neither docker nor podman is available; use a Linux runner."; exit 1; }
         "$engine" pull -q "$TURIAN_IMAGE" > /dev/null || "$engine" image inspect "$TURIAN_IMAGE" > /dev/null
@@ -113,11 +117,21 @@ runs:
             "$image" "$@"
         }
 
-        turian brick verify "$BRICK_PATH"
-        flags=()
-        [[ "$PRECAST" == true ]] && flags+=(--precast)
-        [[ "$TWIN" == true ]] && flags+=(--twin)
-        turian brick pack "$BRICK_PATH" --out /out "${flags[@]}"
+        export SELECTED_CLI_VERSION="$version"
+        build_required=true
+        if [[ -n "$REPLAY_DIRECTORY" ]]; then
+          build_required=$(python3 "$GITHUB_ACTION_PATH/scripts/replay.py" prepare "$REPLAY_DIRECTORY" "$out")
+        fi
+        if [[ "$build_required" == true ]]; then
+          turian brick verify "$BRICK_PATH"
+          flags=()
+          [[ "$PRECAST" == true ]] && flags+=(--precast)
+          [[ "$TWIN" == true ]] && flags+=(--twin)
+          turian brick pack "$BRICK_PATH" --out /out "${flags[@]}"
+        fi
+        if [[ -n "$REPLAY_DIRECTORY" ]]; then
+          python3 "$GITHUB_ACTION_PATH/scripts/replay.py" restore "$REPLAY_DIRECTORY" "$out"
+        fi
 
         # The archive's own package.json says what it is: a twin declares bakeOf. File names are only labels.
         archive="" twin_archive=""

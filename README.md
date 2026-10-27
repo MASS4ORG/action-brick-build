@@ -22,8 +22,11 @@ For push/PR verification with optional source tests, use the [reusable verify wo
 | `version` | Empty | Highest stable semver CLI image tag; exact stable version override supported |
 | `image` | Empty | Exact CLI image supplied by an orchestrating workflow |
 | `release-tag` | Empty | Inject the tag's semver into the packed manifest; warn on manifest drift |
+| `replay-directory` | Empty | Verified stored archives and receipts supplied by the release planner |
 | `out` | Runner temp folder | Archive output directory outside the brick |
 
 Outputs are `image`, `version`, `directory`, `archive` and `twin-archive`. `build.json` records the resolved CLI digest/version and archive hashes. No Docker `latest` tag is used. A manifest already matching `release-tag` is preserved byte-for-byte for retry reproducibility.
+
+Complete recorded releases replay their verified archives instead of recompiling them; consumer tests still run. A missing variant triggers a build, after which verified recorded variants replace their rebuilt counterparts. An inaccessible recorded archive must rebuild to its original hash or the action stops.
 
 `@v1` follows compatible implementation updates. Breaking inputs use a new major version; Turian releases do not require action releases.
